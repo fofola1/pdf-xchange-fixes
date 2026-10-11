@@ -21,8 +21,8 @@ makepkg -si          # after you have reviewed PKGBUILD and .SRCINFO
 
 # 2) rebuild Wine with the rpcrt4 workaround (see "Building patched Wine")
 
-# 3) verify
-WINEDEBUG=fixme-all pdf-xchange --debug-dump
+# 3) verify — run normally; no WINEDEBUG needed, the launcher sets nothing
+pdf-xchange /path/to/sample.pdf
 ```
 
 ---
@@ -138,15 +138,13 @@ Notes:
 
 ## The PKGBUILD launcher fixes (this repo)
 
-The updated `PKGBUILD` (pkgrel 2) fixes three launcher problems and adds a
-quiet-by-default debug setting:
+The updated `PKGBUILD` (pkgrel 2) fixes three launcher problems:
 
 | Problem | Fix |
 |---|---|
 | `cp "$prefix"/Tesseract/* /tmp/$pkgname` with unquoted glob → `cp: cannot stat '/tmp/pdf-xchange/*'` on empty dir | `cp -a "$prefix/Tesseract"/. "/tmp/$pkgname"/ 2>/dev/null` |
 | OCR data copied back only on a clean exit line appended after the wine command → lost when Wine crashes | `trap 'cp -a "/tmp/$pkgname"/. "$prefix/Tesseract"/ 2>/dev/null; rm -rf "/tmp/$pkgname"' EXIT` |
 | Unbounded `while ...; do echo Waiting...; done` busy-loop after `wineboot` | bounded wait (30 × 1s), then continue |
-| Launcher sets no `WINEDEBUG`, so Wine's default `err`/`fixme` output always reaches stderr | `WINEDEBUG="${WINEDEBUG:--all}"` (quiet by default, fully overridable for diagnosis) |
 
 The `/tmp/$pkgname` location is required by the `Tesseract` symlink the package
 installs; running Tesseract from the live prefix would risk corrupting

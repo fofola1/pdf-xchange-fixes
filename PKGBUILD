@@ -1011,10 +1011,6 @@ cp -a "$prefix/Tesseract"/. "/tmp/$pkgname"/ 2>/dev/null
 # copy OCR data back to the persistent prefix on exit, even on crash/shutdown
 trap 'cp -a "/tmp/$pkgname"/. "$prefix/Tesseract"/ 2>/dev/null; rm -rf "/tmp/$pkgname"' EXIT
 
-# keep normal runs quiet; override for debugging, e.g. WINEDEBUG=fixme-all
-WINEDEBUG="${WINEDEBUG:--all}"
-export WINEDEBUG
-
 EOF
 
  echo 'WINEPREFIX="$prefix" /usr/bin/wine "'"$_installdir"'/$program/PXCEditor.exe" "$document"' >> "$pkgdir/usr/bin/$pkgname"
