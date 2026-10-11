@@ -49,7 +49,9 @@ bug 60334 logs the same as "wait handle count 65"). The wait failure makes
 deadlocks, and the main thread finally dies → "unable to dispatch exception".
 
 The ~193k `bidi:GetCharacterPlacementW` and ~14.8k `NtQueryInformationProcess`
-fixme lines are normal noise, **not** the trigger.
+fixme lines are noise, **not** the trigger. Note they only appear at that
+volume because the session was captured with debug output explicitly enabled
+for diagnosis; normal runs do not produce that much output.
 
 Upstream status: WineHQ bug [55705](https://bugs.winehq.org/show_bug.cgi?id=55705)
 ("PDF Xchange editor crashes") — UNCONFIRMED, last change 2026-09-16; linked to
@@ -136,15 +138,15 @@ Notes:
 
 ## The PKGBUILD launcher fixes (this repo)
 
-The updated `PKGBUILD` (pkgrel 2) fixes three launcher problems that made the
-crash worse and pollute output:
+The updated `PKGBUILD` (pkgrel 2) fixes three launcher problems and adds a
+quiet-by-default debug setting:
 
 | Problem | Fix |
 |---|---|
 | `cp "$prefix"/Tesseract/* /tmp/$pkgname` with unquoted glob → `cp: cannot stat '/tmp/pdf-xchange/*'` on empty dir | `cp -a "$prefix/Tesseract"/. "/tmp/$pkgname"/ 2>/dev/null` |
 | OCR data copied back only on a clean exit line appended after the wine command → lost when Wine crashes | `trap 'cp -a "/tmp/$pkgname"/. "$prefix/Tesseract"/ 2>/dev/null; rm -rf "/tmp/$pkgname"' EXIT` |
 | Unbounded `while ...; do echo Waiting...; done` busy-loop after `wineboot` | bounded wait (30 × 1s), then continue |
-| Wine dumps thousands of debug lines on every run | `WINEDEBUG="${WINEDEBUG:--all}"` (default quiet, overridable) |
+| Launcher sets no `WINEDEBUG`, so Wine's default `err`/`fixme` output always reaches stderr | `WINEDEBUG="${WINEDEBUG:--all}"` (quiet by default, fully overridable for diagnosis) |
 
 The `/tmp/$pkgname` location is required by the `Tesseract` symlink the package
 installs; running Tesseract from the live prefix would risk corrupting
