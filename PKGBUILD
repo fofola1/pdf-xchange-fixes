@@ -1,7 +1,7 @@
 # Maintainer: swearchnick <swearchnick[at]gmail[dot]com>
 pkgname="pdf-xchange"
 pkgver="11.1.0.0"
-pkgrel="1"
+pkgrel="2"
 pkgdesc="Feature-rich PDF editor/viewer. Create, view, edit and annotate plus much more."
 license=('Custom')
 arch=('x86_64')
@@ -985,9 +985,13 @@ fi
 
 if [ ! -f "$prefix/system.reg" ] || [ ! -f "$prefix/user.reg" ]; then
    WINEPREFIX="$prefix" /usr/bin/wineboot
+   _wait=0
    while [ ! -f "$prefix/system.reg" ] || [ ! -f "$prefix/user.reg" ]; do
-      echo Waiting...
+      _wait=$((_wait + 1))
+      [ "$_wait" -ge 30 ] && break
+      sleep 1
    done
+   unset _wait
 fi
 
 sed -i s/'"CommonFilesDir"="C:\\\\Program Files\\\\Common Files"'/'"CommonFilesDir"="Z:'"$(printf '%s' "$installdir" | sed s_'/'_'\\\\\\\\'_g)"'\\\\'"${pkgname}"'\\\\Common Files\"'/g "$prefix/system.reg"
@@ -1002,14 +1006,18 @@ if ! grep -q '"Graphics"="x11,wayland"' "$prefix/user.reg"; then
    echo '"Graphics"="x11,wayland"' >> "$prefix/user.reg"
 fi
 
-mkdir "/tmp/$pkgname" "$prefix/Tesseract" &>/dev/null
-cp "$prefix"/Tesseract/* "/tmp/$pkgname" &>/dev/null
+mkdir -p "/tmp/$pkgname" "$prefix/Tesseract" 2>/dev/null
+cp -a "$prefix/Tesseract"/. "/tmp/$pkgname"/ 2>/dev/null
+# copy OCR data back to the persistent prefix on exit, even on crash/shutdown
+trap 'cp -a "/tmp/$pkgname"/. "$prefix/Tesseract"/ 2>/dev/null; rm -rf "/tmp/$pkgname"' EXIT
+
+# keep normal runs quiet; override for debugging, e.g. WINEDEBUG=fixme-all
+WINEDEBUG="${WINEDEBUG:--all}"
+export WINEDEBUG
 
 EOF
 
  echo 'WINEPREFIX="$prefix" /usr/bin/wine "'"$_installdir"'/$program/PXCEditor.exe" "$document"' >> "$pkgdir/usr/bin/$pkgname"
  chmod 0755 "$pkgdir/usr/bin/$pkgname"
-
- echo cp '/tmp/"$pkgname"/*' '"$prefix/Tesseract"' >> "$pkgdir/usr/bin/$pkgname"
 
 }

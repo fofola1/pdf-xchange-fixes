@@ -1,0 +1,67 @@
+From: PDF-XChange AUR maintainer workaround
+Subject: rpcrt4: wait on named-pipe listeners in chunks to avoid the 64-handle limit
+
+WaitForMultipleObjectsEx() only accepts up to MAXIMUM_WAIT_OBJECTS (64)
+handles.  Some applications, notably PDF-XChange Editor's in-process COM
+server (and Steam), keep more than 63 named-pipe listeners registered on a
+single protseq.  Once the wait array grows past 64 entries the wait fails
+with error 87 (STATUS_INVALID_PARAMETER):
+
+    err:rpc:rpcrt4_protseq_np_wait_for_new_connection wait failed with error 87
+
+which makes RPCRT4_server_thread() shut down, leaving the process's COM
+marshaling deadlocked:
+
+    err:sync:RtlpWaitForCriticalSection ... rpc_server.c: server_cs ... blocked by ...
+    err:sync:RtlpWaitForCriticalSection ... combase/rpc.c: dcom registered server interfaces ... blocked by ...
+    err:seh:call_seh_handlers invalid frame ...
+    err:seh:NtRaiseException Exception frame is not in stack limits ...
+
+This is Wine bug 55705 (related: 60334).  Work around the limit by waiting
+on the listener handles in chunks of at most 64 and cycling through all of
+them until one is signaled, instead of letting the wait overflow.
+
+The hunk below was generated against Wine master
+(dlls/rpcrt4/rpc_transport.c, rpcrt4_protseq_np_wait_for_new_connection).
+The surrounding comment block is stable across Wine 8/9/10/11, so the patch
+usually applies with fuzz on those trees; if it does not apply, hand-apply
+the change shown below (it is the only difference).
+
+--- a/dlls/rpcrt4/rpc_transport.c	2026-10-11 16:20:26.456577633 +0200
++++ b/dlls/rpcrt4/rpc_transport.c	2026-10-11 16:20:26.488727201 +0200
+@@ -727,7 +727,34 @@
+          * overlapped I/O implementation in Wine we need to free some memory
+          * by the file user APC being called, even if no completion routine was
+          * specified at the time of starting the async operation */
+-        res = WaitForMultipleObjectsEx(count, objs, FALSE, INFINITE, TRUE);
++        if (count > MAXIMUM_WAIT_OBJECTS)
++        {
++            /* WaitForMultipleObjectsEx only accepts up to MAXIMUM_WAIT_OBJECTS
++             * (64) handles.  Some applications (PDF-XChange Editor, Steam)
++             * accumulate more than 63 listeners on one protseq; once the wait
++             * array grows past 64 entries the wait fails with error 87
++             * (STATUS_INVALID_PARAMETER) and the RPC server thread shuts
++             * down, leaving the whole process's COM marshaling deadlocked
++             * (Wine bugs #55705, #60334).  Wait in chunks instead, cycling
++             * through all listeners until one is signaled. */
++            res = WAIT_TIMEOUT;
++            while (res == WAIT_TIMEOUT)
++            {
++                unsigned int offset, chunk;
++                for (offset = 0; offset < count && res == WAIT_TIMEOUT; offset += chunk)
++                {
++                    chunk = min(MAXIMUM_WAIT_OBJECTS, count - offset);
++                    res = WaitForMultipleObjectsEx(chunk, &objs[offset], FALSE, 1000, TRUE);
++                    if (res == WAIT_IO_COMPLETION) break;
++                    if (res >= WAIT_OBJECT_0 && res < WAIT_OBJECT_0 + chunk)
++                        res += offset;  /* make it an index into the full array */
++                    else if (res != WAIT_TIMEOUT && res != WAIT_FAILED)
++                        res = WAIT_FAILED;
++                }
++            }
++        }
++        else
++            res = WaitForMultipleObjectsEx(count, objs, FALSE, INFINITE, TRUE);
+     } while (res == WAIT_IO_COMPLETION);
+ 
+     if (res == WAIT_OBJECT_0)
