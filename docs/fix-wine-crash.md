@@ -113,6 +113,20 @@ makepkg -si
 wine --version
 ```
 
+**Verify the patched build is what's actually running** — `wine --version`
+alone does not prove it (the version is unchanged by the patch). The
+`Packager` field does: a local `makepkg -si` build records your own
+`makepkg.conf` name/email, while a repo package records the distro:
+
+```bash
+pacman -Qi wine | grep -E 'Packager|Version'
+# local build  -> Packager: <your name> <your@email>
+# repo package -> Packager: CachyOS <admin@cachyos.org>   (or "Arch Linux")
+```
+
+If `Packager` is still CachyOS/Arch, the patch is **not** in your Wine and the
+crash can (and will) still occur — see the freeze diagnosis in this repo.
+
 For **wine-staging** users, the same file exists in the staging tree:
 
 ```bash
@@ -125,6 +139,12 @@ makepkg -si
 
 Notes:
 
+- **CachyOS users:** CachyOS ships its own optimized `wine` build from its own
+  repo (Packager: CachyOS). `asp export wine` gives you Arch's vanilla PKGBUILD
+  — building it replaces the CachyOS build (you lose CachyOS's
+  optimization patches, since upstream Wine does not carry the fix). To keep
+  CachyOS's build *plus* the fix, take CachyOS's PKGBUILD from their packaging
+  repo instead and apply `wine-rpcrt4-np.patch` to it the same way.
 - Keep the same Wine major version you already had (mix Wine versions across
   prefixes is not recommended).
 - If the build fails with a checksum/`source=` mismatch, just re-run `asp export
@@ -178,7 +198,9 @@ makepkg -f           # build the package without installing
    over a long session:
 
    ```bash
-   WINEDEBUG=err+all,fixme-all pdf-xchange 2>&1 | grep -E 'rpc:|RtlpWaitForCriticalSection' | head
+   WINEDEBUG=err+all,fixme-all pdf-xchange 2>&1 | tee /tmp/pxc.log | grep -E 'rpc:|RtlpWaitForCriticalSection' | head
+   # decisive signal — must NEVER appear with the patched wine:
+   grep 'wait failed with error 87' /tmp/pxc.log
    ```
 
    Run steadily for several hours (open/close PDFs, annotations, OCR) — the
