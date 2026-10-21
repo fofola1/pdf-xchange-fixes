@@ -154,6 +154,60 @@ Notes:
   wrong. The patch only relaxes one wait; it does not change RPC behavior when
   fewer than 64 listeners exist (the overwhelmingly common case).
 
+### Testing without installing (dry run)
+
+`makepkg -s` builds the package but installs **nothing** (`-s` only pulls in
+missing *dependencies*; the package itself is only installed by `-i`, which you
+omit). The staged install tree is left in `pkg/wine/usr/` and can be run
+directly — the system Wine is never touched:
+
+```bash
+asp export wine && cd wine
+cp /home/fofola/Desktop/pdf-xchange/wine-rpcrt4-np.patch .
+patch -p1 < wine-rpcrt4-np.patch
+grep -c MAXIMUM_WAIT_OBJECTS dlls/rpcrt4/rpc_transport.c   # >= 2 = patch applied
+makepkg -s                       # NOTE: no -i
+
+L="$PWD/pkg/wine/usr"
+ls "$L/bin/wine" "$L/bin/wineserver" "$L/lib/wine"          # sanity check
+
+# close any running PDF-XChange first, then run on the local build:
+WINEPREFIX="$HOME/.local/share/pdf-xchange/PDF Editor/wine" \
+WINEDLLPATH="$L/lib/wine" \
+WINESERVER="$L/bin/wineserver" \
+WINEDEBUG=err+all,fixme-all \
+"$L/bin/wine" "/usr/lib/pdf-xchange/PDF Editor/PXCEditor.exe" 2>&1 | tee /tmp/pxc-local.log
+```
+
+Why this uses the local build and not the system one:
+
+- `WINEDLLPATH` is **prepended** to Wine's built-in DLL search path (wine(1)),
+  so `rpcrt4.dll.so` and every other DLL resolve from `pkg/wine/usr/lib/wine`
+  first; the loader also references `WINEDLLPATH` itself.
+- `WINESERVER` points the session at the locally built wineserver.
+
+Prove the *local* rpcrt4 is the one actually loaded (it appears in process
+memory maps), then the decisive runtime checks after a long session:
+
+```bash
+grep 'rpcrt4.dll.so' /proc/*/maps 2>/dev/null | sort -u
+#   ... -> .../pkg/wine/usr/lib/wine/x86_64-unix/rpcrt4.dll.so   (local path, NOT /usr/lib/wine/...)
+
+grep 'wait failed with error 87' /tmp/pxc-local.log        # must print NOTHING
+grep -c RtlpWaitForCriticalSection /tmp/pxc-local.log      # must be 0
+```
+
+Notes:
+
+- The `pdf-xchange` launcher hardcodes `/usr/bin/wine`, so a dry run bypasses
+  the launcher and invokes `PXCEditor.exe` directly (as above) with the same
+  `WINEPREFIX` the launcher would use.
+- For a fully isolated first run use a scratch prefix instead:
+  `WINEPREFIX=/tmp/pxc-test "$L/bin/wine" ...` (then configure the app there).
+- `makepkg` keeps `src/` and `pkg/` after the build; `makepkg -c` removes them.
+- Only `err+all,fixme-all` is needed to observe this bug (the failure is an
+  `err:` line); add `,+loaddll` if you want DLL load tracing too.
+
 ---
 
 ## The PKGBUILD launcher fixes (this repo)
